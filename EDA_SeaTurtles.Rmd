@@ -30,7 +30,25 @@ library(tidyr)
 library(viridis)
 library(plotly)
 library(PerformanceAnalytics)
+library(ggpubr)
 ```
+
+# Funciones
+```{r}
+wilcox_bivar <- function(data, categorical_var, groupA, groupB, dependent_var){
+  x <- subset(data, data$categorical_var == quote(groupA), data$dependent_var)
+  x <- subset(data, data$categorical_var == quote(groupB), data$dependent_var)
+  print(mean(x[,1]))
+  print(mean(y[,1]))
+
+wilcox.test(x[,1], y[,1], paired = TRUE, alternative = "two.sided", conf.int = T)
+}
+```
+
+```{r}
+wilcox_bivar(st, epoca, "caliente", "fría", turtles)
+```
+
 
 # Carga de datos
 ```{r}
@@ -144,6 +162,7 @@ Existe relaciones siginificaivas entre visitantes en agua y playa y botes.
 ```{r}
 chart.Correlation(select_if(st, is.numeric), histogram = TRUE, method = "pearson")
 ```
+## Análisis bivariado
 Hay una diferencia siginificativa entre respecto al horario
 
 ```{r}
@@ -156,8 +175,14 @@ y <- subset(st, moment == "temprano", turtles)
 mean(x$turtles)
 mean(y$turtles)
 
-sort(x$turtles-y$turtles)
 wilcox.test(x$turtles, y$turtles, paired = TRUE, alternative = "two.sided", conf.int = T)
+
+```
+```{r}
+p1 <- ggplot(st, aes(x=turtles, group=pres_vis_beach, fill=pres_vis_beach)) + geom_density(alpha = .8) + theme(legend.position = "bottom")
+p2 <- ggplot(st, aes(x=turtles, group=pres_vis_beach, fill=pres_vis_beach)) + geom_boxplot() + coord_flip() + theme(legend.position = "bottom")
+
+ggarrange(p1, p2)
 
 ```
 
