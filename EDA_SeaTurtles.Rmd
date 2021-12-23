@@ -1,0 +1,166 @@
+---
+title: "Exploración de datos de avistamientos de "
+author: "TIID, FCD"
+date: "12/3/2021"
+output:
+  html_document:
+    theme: "cerulean"
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+
+![](https://www.darwinfoundation.org/images/fcd/FCD-logo-mini.jpg)   
+
+Responsable de tratamientos, más información sobre este documento: Juan Carlos Izurieta juancarlos.izurieta@fcdarwin.org.ec   
+
+# Introducción
+Esta es una herramieta exploratoria de datos del proyecto de tortugas marinas y su relación con actividades antropogénicas en la Playa Mansa, proyecto parte de la Fundación Charles Darwin. El objetivo es hacer un EDA de cara a maximizar el potencial explicativo de las variables relacionadas con el avistamiento de tortugas marinas en la bahía.
+
+Para el tratamiento se ha empleado el lenguaje R. Los procedimientos realizados y el código respecivo se presentan en este documento. 
+
+
+# Librerías usadas
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(tidyr)
+library(viridis)
+library(plotly)
+library(PerformanceAnalytics)
+```
+
+# Carga de datos
+```{r}
+data <- tibble(read.csv(r"(data_tortus_mar_dic_2021.csv)"))
+```
+
+Ajuste de nombres de columnas por facilidad de manipulación:
+
+```{r}
+colnames(data) <- tolower(colnames(data))
+
+colnames(data)[1] <- c("grid")
+names(data)
+```
+
+Se reemplazan los valores "#N/A" de las coordenadas por NA y se cambia el tipo de datos a numéricos:
+
+```{r}
+data <- data %>% mutate(across(c(estex, nortey), na_if, "#N/A"))
+data <- data %>% mutate(estex = as.numeric(estex),
+                    nortey = as.numeric(nortey))
+```
+
+# Agrupación de los datos.
+
+El dataset de origen muestra el número de tortugas en cada cuadro (grid), pero mantiene como constante al número de visitantes, botes y kayaks en referencia el id del vuelo. Es decir, para todos los grids del vuelo "V11S" hay la misma cantidad de visitantes, kayaks y botes, a pesar de que el número de tortugas difiere:
+
+```{r}
+data %>% select(grid, id_vuelo, value, vis_beach, vis_water, kayaks, boats)
+```
+
+Esto puede causar ruidos a las inferencias del modelo, porque se el número de tortugas varía por fila, pero no lo hace el número de visitantes, kayaks o botes. Se agrupa entonces los valores por id de vuelo, sumando el total de tortugas avistadas en todos los grids de cada vuelo. 
+
+```{r}
+
+st <- data %>% group_by(id_vuelo, vis_beach, vis_water, kayaks, boats, sky_cover, water_temp, fecha) %>% summarise(turtles = sum(value), .groups = "drop")
+
+```
+
+
+
+# Data cleaning & feature engineering
+
+Se ajusta formato de fecha:
+
+```{r}
+st$fecha <- mdy(st$fecha)
+```
+
+Se crea un campo con la semana del año de la observación y un campo con la época del año:
+
+```{r}
+st$week <- week(st$fecha)
+st <- st %>% mutate(epoca = case_when(month(fecha) < 6 ~ "caliente", TRUE ~ "fría")) 
+
+```
+
+Se crea un campo categórico ante la presencia/ausencia de visitantes, kayaks, botes y la presencia de alguno de estos. También se crea un campo para la presencia/ausencia de tortugas:
+
+```{r}
+st <- st %>% mutate(pres_vis_beach = case_when(vis_beach > 0 ~ "Presencia", TRUE ~ "Ausencia"),
+                    pres_vis_water = case_when(vis_water > 0 ~ "Presencia", TRUE ~ "Ausencia"),
+                    pres_kayaks = case_when(kayaks > 0 ~ "Presencia", TRUE ~ "Ausencia"),
+                    pres_boats = case_when(boats > 0 ~ "Presencia", TRUE ~ "Ausencia"),
+                    pres_any = case_when(sum(vis_beach,vis_water,kayaks,boats) > 0 ~ "Presencia", TRUE ~ "Ausencia"),
+                    pres_sea_turtle = case_when(turtles > 0 ~ "Presencia", TRUE ~ "Ausencia"))
+```
+
+La última letra del código del vuelo indica el horario en el que se hacen los vuelos, siendo "S" los vuelos más tempranos (07h00) y "C" los vuelos más tarde (10h30).
+
+```{r}
+st <- st %>% mutate(moment = substr(st$id_vuelo, nchar(st$id_vuelo), nchar(st$id_vuelo))) %>% mutate(moment = case_when(moment == "C" ~ "tarde", moment == "S" ~ "temprano"))
+
+```
+
+
+# EDA 
+## Variable objetivo
+Estadísticos y distribución:
+
+```{r}
+summary(st$turtles)
+```
+
+
+
+```{r}
+st %>% ggplot(aes(x=turtles)) + geom_density()
+```
+
+
+# Relación con la variable objetivo
+## Mapeo según grids
+```{r}
+update_geom_defaults("point",list(size=4))
+ggplotly(data %>% 
+  filter(!is.na(estex) | !is.na(nortey)) %>% 
+  group_by(grid, estex, nortey) %>% summarise(sum = sum(value), .groups = "drop") %>%
+  ggplot(aes(x=estex, y=nortey, color = sum)) + geom_point() + scale_color_viridis_b())
+
+```
+
+```{r}
+# data %>% group_by(estex, nortey) %>% summarise(turtles = sum(value), .groups = "drop") %>% uncount(turtles, .remove =F)
+```
+
+
+## Correlograma
+Existe relaciones siginificaivas entre visitantes en agua y playa y botes.
+
+```{r}
+chart.Correlation(select_if(st, is.numeric), histogram = TRUE, method = "pearson")
+```
+Hay una diferencia siginificativa entre respecto al horario
+
+```{r}
+ggplot(st, aes(x=fecha, y=turtles, color = moment)) + geom_line() + geom_point()
+```
+```{r}
+x <- subset(st, moment == "tarde", turtles)
+y <- subset(st, moment == "temprano", turtles)
+
+mean(x$turtles)
+mean(y$turtles)
+
+sort(x$turtles-y$turtles)
+wilcox.test(x$turtles, y$turtles, paired = TRUE, alternative = "two.sided", conf.int = T)
+
+```
+
+
+
+
